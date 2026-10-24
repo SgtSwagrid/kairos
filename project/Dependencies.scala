@@ -7,21 +7,21 @@ object Dependencies:
   /** The version to use for each dependency. */
   object V:
 
-    val tapir           = "1.13.31"
-    val slf4j           = "2.0.19"
-    val logback         = "1.6.3"
+    val tapir           = "1.13.33"
+    val slf4j           = "2.0.20"
+    val logback         = "1.6.5"
     val fs2             = "3.14.0"
-    val assetLoader     = "0.1.6"
+    val assetLoader     = "0.1.12"
     val scalajs         = "2.8.1"
     val laminar         = "17.0.0"
     val laminext        = "0.17.0"
-    val circe           = "0.14.16"
+    val circe           = "0.14.17"
     val cats            = "2.13.0"
     val catsEffect      = "3.7.1"
     val catsMtl         = "1.7.0"
     val catsCollections = "0.9.10"
     val munit           = "1.0.3"
-    val munitCatsEffect = "2.2.0"
+    val munitCatsEffect = "2.2.1"
 
   /**
     * Core Tapir dependencies for defining API endpoints. Cross-compiled for

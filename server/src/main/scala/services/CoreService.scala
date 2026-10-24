@@ -1,7 +1,6 @@
 package com.alecdorrington.server
 package services
 
-import cats.effect.IO
 import com.alecdorrington.server.api.CoreApi
 import com.alecdorrington.server.config.Env
 import com.alecdorrington.server.html.Template
@@ -19,7 +18,7 @@ object CoreService extends Service("core"):
     * An endpoint that serves static files from the client's "resources"
     * directory. Returns `304 Not Modified` if the client's cached ETag matches.
     */
-  lazy val assets: Endpoint = CoreApi.assetService.serverEndpoint[IO]
+  lazy val assets: Endpoint = CoreApi.assetService.serverEndpoint
 
   /**
     * An endpoint that establishes a websocket connection so that the client is
