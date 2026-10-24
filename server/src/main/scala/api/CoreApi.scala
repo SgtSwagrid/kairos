@@ -14,7 +14,7 @@ import sttp.tapir.*
 object CoreApi:
 
   /** Serves static files, shared with the service that implements it. */
-  val assetService = new AssetService(
+  val assetService = new AssetService[IO](
     "assets",
     Env.ASSETS_DIR,
     if Env.DEV_MODE then 0 else 3600,
