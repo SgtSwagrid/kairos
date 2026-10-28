@@ -37,6 +37,9 @@ class ElicitationSuite extends FunSuite:
     )
     : Round = Analysis.of(subject, budget, perParticipant).round
 
+  /** The first round on [[base]], which several tests examine. */
+  private lazy val opening: Round = round(base)
+
   /**
     * The proportion of a round's questions that are pooled rather than
     * specific.
@@ -52,41 +55,30 @@ class ElicitationSuite extends FunSuite:
       case _                                      => false
     pooled.toDouble / enquiries.size
 
-  test("broad questions come first while naming a date is costly"):
+  test("discretion governs how readily a date is named"):
     // A named date is more informative but dearer to ask, so screening wins out
     // early, exactly as in group testing: one refusal for a whole month rules out
     // every weekend in it at a stroke, and nobody has been asked to hold a date.
-    val careful = poll(
+    // Once there is no cost to naming one, named dates come first.
+    def asked(prior: Double, discretion: Double): Double = pooling(poll(
       slots,
       guests,
-      Objective(prior = 0.2, discretion = 3.0),
-    )
-    assert(
-      pooling(careful) >= 0.85,
-      pooling(careful),
-    )
-
-  test("named dates come first once there is no cost to naming one"):
-    val blunt = poll(
-      slots,
-      guests,
-      Objective(prior = 0.2, discretion = 1.0),
-    )
-    assert(pooling(blunt) < 0.1, pooling(blunt))
-
-  test("discretion governs how readily a date is named"):
-    def asked(discretion: Double): Double = pooling(poll(
-      slots,
-      guests,
-      Objective(prior = 0.3, discretion = discretion),
+      Objective(prior = prior, discretion = discretion),
     ))
+    val careful = asked(0.2, 3.0)
+    val blunt   = asked(0.2, 1.0)
+    assert(careful >= 0.85, careful)
+    assert(blunt < 0.1, blunt)
+    val wary     = asked(0.3, 6.0)
+    val middling = asked(0.3, 2.0)
+    val bold     = asked(0.3, 1.0)
     assert(
-      asked(6.0) >= asked(2.0),
-      s"${ asked(6.0) } should be at least ${ asked(2.0) }",
+      wary >= middling,
+      s"$wary should be at least $middling",
     )
     assert(
-      asked(2.0) >= asked(1.0),
-      s"${ asked(2.0) } should be at least ${ asked(1.0) }",
+      middling >= bold,
+      s"$middling should be at least $bold",
     )
 
   test("once the broad questions are answered, dates are named"):
@@ -121,10 +113,12 @@ class ElicitationSuite extends FunSuite:
             .take(3) }",
     )
 
-  test("a round respects its budget and its per-participant limit"):
-    val chosen = round(base, budget = 15, perParticipant = 2)
+  test(
+    "a round keeps to its limits, spreads widely, and asks only questions worth something, within what is left to resolve",
+  ):
+    val chosen = opening
     assert(
-      chosen.enquiries.sizeIs <= 15,
+      chosen.enquiries.sizeIs <= 20,
       chosen.enquiries.size,
     )
     chosen
@@ -134,55 +128,28 @@ class ElicitationSuite extends FunSuite:
           asked.sizeIs <= 2,
           s"$who was asked ${ asked.size } questions",
         )
-
-  test("a round spreads its questions across many participants"):
-    val chosen = round(base, budget = 20, perParticipant = 2)
     assert(
       chosen.recipients >= 8,
       s"only ${ chosen.recipients } participants would be contacted",
     )
-
-  test("no question is put to the same participant twice in a round"):
-    val chosen = round(base, budget = 30, perParticipant = 3).enquiries
-    val pairs  = chosen.map(enquiry => enquiry.participant -> enquiry.question)
+    val pairs = chosen
+      .enquiries
+      .map(enquiry => enquiry.participant -> enquiry.question)
     assertEquals(pairs.distinct.size, pairs.size)
-
-  test("a question already answered is never asked again"):
-    val first   = round(base, budget = 10).enquiries
-    val answers = first.map(enquiry =>
-      Response(
-        enquiry.participant,
-        enquiry.question,
-        Availability.Yes,
-      ),
-    )
-    val second = round(base.record(answers), budget = 10).enquiries
-    val asked  = first.map(e => e.participant -> e.question).toSet
-    second.foreach: enquiry =>
-      assert(
-        !asked(enquiry.participant -> enquiry.question),
-        enquiry.toString,
-      )
-
-  test("a round cannot resolve more than is left to resolve"):
+    assert(chosen.enquiries.nonEmpty)
+    assert(chosen.enquiries.forall(_.worth > 0.0))
     // Both sides are in bits. Comparing a round's worth against the verdict's
     // value of information would set bits against weighted heads, two things the
     // solver is at pains to keep apart.
-    val analysis = Analysis.of(base, budget = 20, perParticipant = 2)
     assert(
-      analysis.round.worth <= analysis.round.available + 1.0e-6,
-      s"${ analysis.round.worth } exceeded ${ analysis.round.available }",
+      chosen.worth <= chosen.available + 1.0e-6,
+      s"${ chosen.worth } exceeded ${ chosen.available }",
     )
     assert(
-      analysis.round.worth > 0.0,
+      chosen.worth > 0.0,
       "and it should be worth something",
     )
-    assert(analysis.round.coverage <= 1.0 + 1.0e-6)
-
-  test("every question chosen is worth something"):
-    val chosen = round(base, budget = 20).enquiries
-    assert(chosen.nonEmpty)
-    assert(chosen.forall(_.worth > 0.0))
+    assert(chosen.coverage <= 1.0 + 1.0e-6)
 
   test("a second question to the same guest may be worth more than the first"):
     // Not a defect but a property of the measure. Knowing whether someone could
@@ -191,8 +158,8 @@ class ElicitationSuite extends FunSuite:
     // information is submodular across participants, whose answers are
     // independent, but not within one, so the worth of a round's questions does
     // not decrease along the way.
-    val chosen = round(base, budget = 20, perParticipant = 2).enquiries
-    val pairs  = chosen
+    val pairs = opening
+      .enquiries
       .groupBy(_.participant)
       .values
       .collect:
@@ -206,7 +173,54 @@ class ElicitationSuite extends FunSuite:
       "complementary questions should show up as an increase",
     )
 
-  test("nothing is asked once the answers are all in"):
+  test(
+    "a question already answered is never asked again, and a participant who has answered about every slot is left alone",
+  ):
+    val answers = opening
+      .enquiries
+      .map(enquiry =>
+        Response(
+          enquiry.participant,
+          enquiry.question,
+          Availability.Yes,
+        ),
+      )
+    val asked = answers
+      .map(answer => answer.participant -> answer.question)
+      .toSet
+    round(base.record(answers))
+      .enquiries
+      .foreach: enquiry =>
+        assert(
+          !asked(enquiry.participant -> enquiry.question),
+          enquiry.toString,
+        )
+    val thorough = round(
+      base.copy(responses =
+        slots.map(says("guest1", _, Availability.Probably)),
+      ),
+      budget = 40,
+    )
+    assert(
+      !thorough.enquiries.exists(_.participant == Id[Participant]("guest1")),
+      "there is nothing left to ask them that they have not already told us",
+    )
+    assert(
+      thorough.enquiries.nonEmpty,
+      "but everybody else is still worth asking",
+    )
+
+  test(
+    "nothing is asked of a poll without participants or slots, or once the answers are all in",
+  ):
+    assertEquals(
+      round(poll(slots, List.empty)).enquiries,
+      List.empty,
+    )
+    assertEquals(
+      round(poll(List.empty, guests)).enquiries,
+      List.empty,
+    )
     val answers =
       for
         guest     <- guests
@@ -215,33 +229,6 @@ class ElicitationSuite extends FunSuite:
     val chosen = round(base.copy(responses = answers))
     assertEquals(chosen.enquiries, List.empty)
     assertEqualsDouble(chosen.worth, 0.0, 1.0e-9)
-
-  test("a participant who has answered about every slot is left alone"):
-    val answers = slots.map(says("guest1", _, Availability.Probably))
-    val chosen  = round(
-      base.copy(responses = answers),
-      budget = 40,
-    )
-    assert(
-      !chosen.enquiries.exists(_.participant == Id[Participant]("guest1")),
-      "there is nothing left to ask them that they have not already told us",
-    )
-    assert(
-      chosen.enquiries.nonEmpty,
-      "but everybody else is still worth asking",
-    )
-
-  test("a poll with no participants yields no questions"):
-    assertEquals(
-      round(poll(slots, List.empty)).enquiries,
-      List.empty,
-    )
-
-  test("a poll with no slots yields no questions"):
-    assertEquals(
-      round(poll(List.empty, guests)).enquiries,
-      List.empty,
-    )
 
   test("essential guests are asked before ordinary ones"):
     val mixed  = guests.take(18) :+ participant("vip", weight = 12.0)
