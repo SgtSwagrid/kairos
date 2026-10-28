@@ -8,18 +8,32 @@ import munit.FunSuite
 class ForecastSuite extends FunSuite:
 
   test(
-    "the attendance distribution is a distribution whose mean is the sum of the probabilities, binomial where they are equal, and all on one outcome where they are certain",
+    "the attendance distribution sums to one around the probabilities' sum, binomial for equal ones and certain for certain ones",
   ):
     val probabilities = List(0.1, 0.35, 0.5, 0.72, 0.9, 0.99)
     val distribution  = Forecast.poissonBinomial(probabilities)
     assertEquals(
       distribution.size,
       probabilities.size + 1,
+      "one outcome for each possible count",
     )
-    assertEqualsDouble(distribution.sum, 1.0, 1.0e-9)
-    assert(distribution.forall(_ >= 0.0))
+    assertEqualsDouble(
+      distribution.sum,
+      1.0,
+      1.0e-9,
+      "the total",
+    )
+    assert(
+      distribution.forall(_ >= 0.0),
+      distribution,
+    )
     val mean = distribution.zipWithIndex.map((p, count) => p * count).sum
-    assertEqualsDouble(mean, probabilities.sum, 1.0e-9)
+    assertEqualsDouble(
+      mean,
+      probabilities.sum,
+      1.0e-9,
+      "the mean",
+    )
 
     val trials      = 8
     val probability = 0.3
@@ -31,10 +45,23 @@ class ForecastSuite extends FunSuite:
         math.pow(1 - probability, trials - successes)
     binomial
       .lazyZip(expected)
-      .foreach((actual, want) => assertEqualsDouble(actual, want, 1.0e-9))
+      .lazyZip(0 to trials)
+      .foreach((actual, want, successes) =>
+        assertEqualsDouble(
+          actual,
+          want,
+          1.0e-9,
+          s"the binomial chance of $successes",
+        ),
+      )
 
     val certain = Forecast.poissonBinomial(List(1.0, 1.0, 0.0))
-    assertEqualsDouble(certain(2), 1.0, 1.0e-9)
+    assertEqualsDouble(
+      certain(2),
+      1.0,
+      1.0e-9,
+      "certain trials",
+    )
 
   test(
     "an overfull venue is penalised and flagged as risky, and an impossible capacity does not make risk and overflow disagree",

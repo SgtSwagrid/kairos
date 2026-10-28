@@ -40,6 +40,9 @@ class ElicitationSuite extends FunSuite:
   /** The first round on [[base]], which several tests examine. */
   private lazy val opening: Round = round(base)
 
+  /** A longer first round on [[base]], allowing three questions each. */
+  private lazy val longer: Round = round(base, budget = 30, perParticipant = 3)
+
   /**
     * The proportion of a round's questions that are pooled rather than
     * specific.
@@ -67,18 +70,24 @@ class ElicitationSuite extends FunSuite:
     ))
     val careful = asked(0.2, 3.0)
     val blunt   = asked(0.2, 1.0)
-    assert(careful >= 0.85, careful)
-    assert(blunt < 0.1, blunt)
+    assert(
+      careful >= 0.85,
+      s"only $careful of the questions were pooled at a discretion of 3",
+    )
+    assert(
+      blunt < 0.1,
+      s"$blunt of the questions were pooled at a discretion of 1",
+    )
     val wary     = asked(0.3, 6.0)
     val middling = asked(0.3, 2.0)
     val bold     = asked(0.3, 1.0)
     assert(
       wary >= middling,
-      s"$wary should be at least $middling",
+      s"$wary pooled at a discretion of 6 should be at least $middling at 2",
     )
     assert(
       middling >= bold,
-      s"$middling should be at least $bold",
+      s"$middling pooled at a discretion of 2 should be at least $bold at 1",
     )
 
   test("once the broad questions are answered, dates are named"):
@@ -114,30 +123,59 @@ class ElicitationSuite extends FunSuite:
     )
 
   test(
-    "a round keeps to its limits, spreads widely, and asks only questions worth something, within what is left to resolve",
+    "a round keeps to its budget and per-participant limit, and never puts a question to anyone twice",
+  ):
+    val tight = round(base, budget = 15)
+    // The longer round asks more than fifteen, so a budget of fifteen binds.
+    assert(
+      longer.enquiries.sizeIs > 15,
+      s"a budget of 30 asked only ${ longer.enquiries.size }",
+    )
+    assert(
+      tight.enquiries.sizeIs <= 15,
+      s"a budget of 15 asked ${ tight.enquiries.size }",
+    )
+    assert(
+      longer.enquiries.sizeIs <= 30,
+      s"a budget of 30 asked ${ longer.enquiries.size }",
+    )
+    List(tight -> 2, longer -> 3).foreach: (chosen, limit) =>
+      chosen
+        .byParticipant
+        .foreach: (who, asked) =>
+          assert(
+            asked.sizeIs <= limit,
+            s"$who was asked ${ asked.size }, over the limit of $limit",
+          )
+    // A third question to one participant is the likeliest to repeat one.
+    assert(
+      longer.byParticipant.values.exists(_.sizeIs == 3),
+      "nobody was asked a third question",
+    )
+    val pairs = longer
+      .enquiries
+      .map(enquiry => enquiry.participant -> enquiry.question)
+    assertEquals(
+      pairs.distinct.size,
+      pairs.size,
+      "a question was put to the same participant twice",
+    )
+
+  test(
+    "a round spreads widely and asks only questions worth something, within what is left to resolve",
   ):
     val chosen = opening
-    assert(
-      chosen.enquiries.sizeIs <= 20,
-      chosen.enquiries.size,
-    )
-    chosen
-      .byParticipant
-      .foreach: (who, asked) =>
-        assert(
-          asked.sizeIs <= 2,
-          s"$who was asked ${ asked.size } questions",
-        )
     assert(
       chosen.recipients >= 8,
       s"only ${ chosen.recipients } participants would be contacted",
     )
-    val pairs = chosen
+    assert(
+      chosen.enquiries.nonEmpty,
+      "something should be asked",
+    )
+    chosen
       .enquiries
-      .map(enquiry => enquiry.participant -> enquiry.question)
-    assertEquals(pairs.distinct.size, pairs.size)
-    assert(chosen.enquiries.nonEmpty)
-    assert(chosen.enquiries.forall(_.worth > 0.0))
+      .foreach(enquiry => assert(enquiry.worth > 0.0, enquiry.toString))
     // Both sides are in bits. Comparing a round's worth against the verdict's
     // value of information would set bits against weighted heads, two things the
     // solver is at pains to keep apart.
@@ -149,7 +187,10 @@ class ElicitationSuite extends FunSuite:
       chosen.worth > 0.0,
       "and it should be worth something",
     )
-    assert(chosen.coverage <= 1.0 + 1.0e-6)
+    assert(
+      chosen.coverage <= 1.0 + 1.0e-6,
+      s"a coverage of ${ chosen.coverage }",
+    )
 
   test("a second question to the same guest may be worth more than the first"):
     // Not a defect but a property of the measure. Knowing whether someone could
@@ -216,10 +257,12 @@ class ElicitationSuite extends FunSuite:
     assertEquals(
       round(poll(slots, List.empty)).enquiries,
       List.empty,
+      "no participants",
     )
     assertEquals(
       round(poll(List.empty, guests)).enquiries,
       List.empty,
+      "no slots",
     )
     val answers =
       for
@@ -227,8 +270,17 @@ class ElicitationSuite extends FunSuite:
         candidate <- slots
       yield says(guest.name, candidate, Availability.Yes)
     val chosen = round(base.copy(responses = answers))
-    assertEquals(chosen.enquiries, List.empty)
-    assertEqualsDouble(chosen.worth, 0.0, 1.0e-9)
+    assertEquals(
+      chosen.enquiries,
+      List.empty,
+      "every answer in",
+    )
+    assertEqualsDouble(
+      chosen.worth,
+      0.0,
+      1.0e-9,
+      "every answer in",
+    )
 
   test("essential guests are asked before ordinary ones"):
     val mixed  = guests.take(18) :+ participant("vip", weight = 12.0)

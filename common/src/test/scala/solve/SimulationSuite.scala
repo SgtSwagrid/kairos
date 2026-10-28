@@ -233,7 +233,7 @@ class SimulationSuite extends FunSuite:
     )
 
   test(
-    "asking narrows what remains to be learned and grows confidence in a choice far better than an uninformed one, asking nobody more than a handful of questions",
+    "asking narrows what is left to learn and grows confidence in a choice far better than an uninformed one, asking nobody much",
   ):
     val (_, hidden, course) = courses.head
     val first               = course(1)._2
