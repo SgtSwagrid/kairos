@@ -15,7 +15,14 @@ class VerdictSuite extends FunSuite:
   private def verdict(responses: List[Response]): Verdict =
     advise(poll(List(good, bad), folk).copy(responses = responses))
 
-  test("confidence is a distribution over the slots"):
+  test(
+    "knowing nothing leaves no slot looking certain or out of contention, with the recommendation's regret as the value of information",
+  ):
+    // Note that two interchangeable slots genuinely leave little to learn: a
+    // dozen guests split between them either way, so whichever is chosen is
+    // about as good. It takes a real field of slots before asking pays, which is
+    // what the test of the irreducible floor below checks, on a poll nobody has
+    // answered.
     val advice = verdict(List.empty)
     assertEqualsDouble(
       advice.confidence.values.sum,
@@ -23,37 +30,26 @@ class VerdictSuite extends FunSuite:
       1.0e-9,
     )
     assertEquals(advice.confidence.size, 2)
-
-  test("the value of information is the regret of the recommendation"):
-    val advice = verdict(List.empty)
-    val chosen = advice.recommended.get
-    assertEqualsDouble(
-      advice.information,
-      advice.regret(chosen.id),
-      1.0e-9,
-    )
-
-  test("regret is never negative and vanishes for some slot"):
-    val advice = verdict(List.empty)
-    assert(advice.regret.values.forall(_ >= -1.0e-9))
-    assert(advice.regret.values.min >= 0.0)
-
-  test("knowing nothing leaves no slot looking certain"):
-    // Note that two interchangeable slots genuinely leave little to learn: a
-    // dozen guests split between them either way, so whichever is chosen is
-    // about as good. It takes a real field of slots before asking pays, which is
-    // what "a poll nobody has answered is not settled" below checks.
-    val advice = verdict(List.empty)
-    assert(
-      advice.information > 0.0,
-      advice.information,
-    )
     assert(
       advice.confidence.values.max < 0.9,
       "no slot should look certain",
     )
+    assertEquals(advice.contenders().size, 2)
+    assert(
+      advice.information > 0.0,
+      advice.information,
+    )
+    assertEqualsDouble(
+      advice.information,
+      advice.regret(advice.recommended.get.id),
+      1.0e-9,
+    )
+    assert(advice.regret.values.forall(_ >= -1.0e-9))
+    assert(advice.regret.values.min >= 0.0)
 
-  test("a unanimous answer settles the choice"):
+  test(
+    "a unanimous answer settles the choice, leaving the other slot out of contention",
+  ):
     val answers = folk.flatMap: guest =>
       List(
         says(guest.name, good, Availability.Yes),
@@ -73,6 +69,10 @@ class VerdictSuite extends FunSuite:
       advice.information,
     )
     assert(advice.settled)
+    assertEquals(
+      advice.contenders().map(_.venue),
+      List("Good"),
+    )
 
   test("forecasts are ordered best first and agree with the recommendation"):
     val answers = folk.map(guest => says(guest.name, good, Availability.Yes))
@@ -107,28 +107,15 @@ class VerdictSuite extends FunSuite:
       Some("Roomy"),
     )
 
-  test("contenders exclude slots that have already lost"):
-    val answers = folk.flatMap: guest =>
-      List(
-        says(guest.name, good, Availability.Yes),
-        says(guest.name, bad, Availability.No),
-      )
-    assertEquals(
-      verdict(answers).contenders().map(_.venue),
-      List("Good"),
-    )
-    assertEquals(
-      verdict(List.empty).contenders().size,
-      2,
-    )
-
   test("an empty poll is handled without complaint"):
     val advice = advise(poll(List.empty, List.empty))
     assertEquals(advice.recommended, None)
     assertEquals(advice.forecasts, List.empty)
     assertEqualsDouble(advice.information, 0.0, 1.0e-9)
 
-  test("the irreducible floor is measured and taken out of the advice"):
+  test(
+    "the irreducible floor is measured and taken out of the advice, without settling a poll nobody has answered",
+  ):
     // Everybody has answered directly about every slot, so nothing is left to
     // learn. What spread remains is the chance that a guest who says they can
     // come does not, which no further question could resolve.
@@ -158,18 +145,8 @@ class VerdictSuite extends FunSuite:
       s"nothing is left to learn, yet information is ${ advice.information }",
     )
 
-  test("a poll nobody has answered is not settled by the correction"):
-    val many  = (1 to 32).map(index => participant(s"guest$index")).toList
-    val dates = (0 until 24)
-      .map(index =>
-        slot(
-          "Venue",
-          Day.ofEpochDay(20940 + 7 * index).iso,
-        ),
-      )
-      .toList
-    val advice = advise(poll(dates, many))
+    val unanswered = advise(poll(dates, many))
     assert(
-      !advice.settled,
-      s"information is only ${ advice.information }",
+      !unanswered.settled,
+      s"information is only ${ unanswered.information }",
     )

@@ -128,69 +128,90 @@ class SimulationSuite extends FunSuite:
     val bearing = slots.indices.filter(slot => question.bearsOn(slots(slot)))
     if bearing.exists(hidden(guest)) then Availability.Yes else Availability.No
 
-  /** Conducts one round against a hidden truth, returning the poll it leads to. */
-  private def conduct
+  /** The advice on a poll, as each round takes it. */
+  private def analyse(current: Poll): Analysis =
+    Analysis.of(current, budget, perParticipant = 2)
+
+  /** The truthful answers to the questions that some advice would ask. */
+  private def answers
     (
       hidden: Vector[Vector[Boolean]],
-      current: Poll,
+      advice: Analysis,
     )
-    : Poll =
-    val analysis = Analysis.of(current, budget, perParticipant = 2)
-    current.record(
-      analysis
-        .round
-        .enquiries
-        .map: enquiry =>
-          val guest = guests.indexWhere(_.id == enquiry.participant)
-          Response(
-            enquiry.participant,
-            enquiry.question,
-            reply(hidden, guest, enquiry.question),
-          ),
-    )
+    : List[Response] = advice
+    .round
+    .enquiries
+    .map: enquiry =>
+      val guest = guests.indexWhere(_.id == enquiry.participant)
+      Response(
+        enquiry.participant,
+        enquiry.question,
+        reply(hidden, guest, enquiry.question),
+      )
 
-  /** Conducts the full course of rounds against one hidden truth. */
-  private def elicit(hidden: Vector[Vector[Boolean]]): Poll = (1 to rounds)
-    .foldLeft(base)((current, _) => conduct(hidden, current))
+  /**
+    * Conducts the full course of rounds against one hidden truth.
+    *
+    * @return
+    *   The poll before each round and after the last, each with its advice.
+    */
+  private def elicit(hidden: Vector[Vector[Boolean]]): List[(Poll, Analysis)] =
+    List.iterate((base, analyse(base)), rounds + 1): (current, advice) =>
+      val next = current.record(answers(hidden, advice))
+      (next, analyse(next))
+
+  /**
+    * Each hidden guest list, with the course of rounds conducted against it.
+    *
+    * Worked out once and shared by the tests below, as conducting the rounds is
+    * nearly all of their cost.
+    */
+  private lazy val courses
+    : List[(Long, Vector[Vector[Boolean]], List[(Poll, Analysis)])] = worlds
+    .map: seed =>
+      val hidden = truth(seed)
+      (seed, hidden, elicit(hidden))
 
   /**
     * How good the solver's choice proved to be against one hidden guest list.
     *
-    * @param seed
-    *   Which hidden guest list to try.
+    * @param hidden
+    *   The guest list's hidden truth.
+    *
+    * @param outcome
+    *   The advice the solver finished with.
     *
     * @return
-    *   The chosen slot's share of the best available value, its true rank, and
-    *   the advice the solver finished with.
+    *   The chosen slot's share of the best available value, and its true rank.
     */
-  private def quality(seed: Long): (Double, Int, Analysis) =
-    val hidden  = truth(seed)
-    val outcome = Analysis.of(
-      elicit(hidden),
-      budget,
-      perParticipant = 2,
+  private def quality
+    (
+      hidden: Vector[Vector[Boolean]],
+      outcome: Analysis,
     )
+    : (Double, Int) =
     val chosen = slots.indexWhere(_.id == outcome.verdict.recommended.get.id)
     val values = slots.indices.map(value(hidden, _))
     (
       values(chosen) / values.max,
       values.sorted.reverse.indexOf(values(chosen)) + 1,
-      outcome,
     )
 
   test(
     s"$rounds short rounds find a near-best slot, across several guest lists",
   ):
 
-    val outcomes = worlds.map(seed => seed -> quality(seed))
-    val shares   = outcomes.map(_._2._1)
-    val mean     = shares.sum / shares.size
+    val outcomes = courses.map: (seed, hidden, course) =>
+      val outcome       = course.last._2
+      val (share, rank) = quality(hidden, outcome)
+      (seed, share, rank, outcome)
+    val shares = outcomes.map(_._2)
+    val mean   = shares.sum / shares.size
 
     println(f"\n  ${ slots.size } slots, ${ guests
         .size } guests," + f" $rounds rounds of $budget questions")
     println("  guest list   of best   rank   still to learn")
-    outcomes.foreach: (seed, result) =>
-      val (share, rank, outcome) = result
+    outcomes.foreach: (seed, share, rank, outcome) =>
       println(
         f"  $seed%10d   ${ 100 * share }%5.0f%%   #$rank%-4d  " +
           f"${ outcome.verdict.information }%5.2f",
@@ -211,51 +232,30 @@ class SimulationSuite extends FunSuite:
           .size } lists found the very best slot",
     )
 
-  test("the choice is far better than an uninformed one"):
-    val hidden        = truth(worlds.head)
-    val values        = slots.indices.map(value(hidden, _))
-    val middle        = values.sum / values.size
-    val (share, _, _) = quality(worlds.head)
+  test(
+    "asking narrows what is left to learn and grows confidence in a choice far better than an uninformed one, asking nobody much",
+  ):
+    val (_, hidden, course) = courses.head
+    val first               = course(1)._2
+    val (finished, outcome) = course.last
+
+    val values     = slots.indices.map(value(hidden, _))
+    val middle     = values.sum / values.size
+    val (share, _) = quality(hidden, outcome)
     assert(
       share * values.max > middle + 0.6 * (values.max - middle),
       f"${ share * values.max }%.1f against a mean of $middle%.1f",
     )
 
-  test("asking narrows what remains to be learned"):
     // Compared start to finish rather than round by round. The value of
     // information is not monotone and should not be asserted to be: learning
     // that many guests are free in one month widens the gap between the slots,
     // so what it would cost to choose wrongly can rise for a round before it
     // falls.
-    val hidden = truth(worlds.head)
-    val first  = Analysis.of(
-      conduct(hidden, base),
-      budget,
-      perParticipant = 2,
-    )
-    val last = Analysis.of(
-      elicit(hidden),
-      budget,
-      perParticipant = 2,
-    )
-
     assert(
-      last.verdict.information < 0.5 * first.verdict.information,
-      s"${ last.verdict.information } should be well below " +
+      outcome.verdict.information < 0.5 * first.verdict.information,
+      s"${ outcome.verdict.information } should be well below " +
         s"${ first.verdict.information }",
-    )
-
-  test("confidence in the leading slot grows as answers arrive"):
-    val hidden = truth(worlds.head)
-    val first  = Analysis.of(
-      conduct(hidden, base),
-      budget,
-      perParticipant = 2,
-    )
-    val outcome = Analysis.of(
-      elicit(hidden),
-      budget,
-      perParticipant = 2,
     )
 
     def leading(analysis: Analysis): Double =
@@ -266,8 +266,6 @@ class SimulationSuite extends FunSuite:
       s"${ leading(outcome) } should exceed ${ leading(first) }",
     )
 
-  test("no guest is asked more than a handful of questions in total"):
-    val finished = elicit(truth(worlds.head))
     val burden = finished.responses.groupMapReduce(_.participant)(_ => 1)(_ + _)
     // Two per round is the cap set above, so this is the most anyone can be
     // asked; the point of the check is that nobody is asked beyond it.

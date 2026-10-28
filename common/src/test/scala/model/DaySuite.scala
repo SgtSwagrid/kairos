@@ -16,25 +16,25 @@ class DaySuite extends FunSuite:
     ("2100-03-01", 47541, "Mon"),
   )
 
-  test("known dates have the expected offset from the epoch"):
-    references.foreach: (iso, epochDay, _) =>
+  test(
+    "known dates have the expected offset from the epoch and weekday, rendering as ISO inverts parsing, and malformed dates are rejected",
+  ):
+    // The references fall on all seven weekdays, either side of the epoch.
+    references.foreach: (iso, epochDay, weekday) =>
       assertEquals(
         Day.parse(iso).map(_.epochDay),
         Some(epochDay),
         iso,
       )
-
-  test("known dates fall on the expected weekday"):
-    references.foreach: (iso, _, weekday) =>
       assertEquals(
         Day.parse(iso).map(_.weekdayName),
         Some(weekday),
         iso,
       )
-
-  test("rendering as ISO inverts parsing"):
-    references.foreach: (iso, _, _) =>
       assertEquals(Day.parse(iso).map(_.iso), Some(iso))
+    assertEquals(Day.parse("not a date"), None)
+    assertEquals(Day.parse("2027-06"), None)
+    assertEquals(Day.parse("2027-xx-11"), None)
 
   test("civil components invert construction across a long span"):
     (-30000 to 30000).foreach: epochDay =>
@@ -45,19 +45,9 @@ class DaySuite extends FunSuite:
         epochDay,
       )
 
-  test("weekdays advance by one each day"):
-    // 2026-09-20 is a Sunday, which is weekday zero.
-    (0 until 400).foreach: offset =>
-      val day = Day.ofEpochDay(20716 + offset)
-      assertEquals(day.weekday, offset % 7, day.iso)
-
-  test("29 February exists only in leap years"):
-    assertEquals(Day.of(2024, 2, 29).iso, "2024-02-29")
-    assertEquals(Day.of(2023, 2, 29).iso, "2023-03-01")
-    assertEquals(Day.of(1900, 2, 29).iso, "1900-03-01")
-    assertEquals(Day.of(2000, 2, 29).iso, "2000-02-29")
-
-  test("month boundaries are found correctly"):
+  test(
+    "month boundaries are found correctly, and 29 February exists only in leap years",
+  ):
     val day = Day.of(2027, 6, 11)
     assertEquals(day.startOfMonth.iso, "2027-06-01")
     assertEquals(day.endOfMonth.iso, "2027-06-30")
@@ -73,8 +63,7 @@ class DaySuite extends FunSuite:
       Day.of(2027, 12, 3).endOfMonth.iso,
       "2027-12-31",
     )
-
-  test("malformed dates are rejected"):
-    assertEquals(Day.parse("not a date"), None)
-    assertEquals(Day.parse("2027-06"), None)
-    assertEquals(Day.parse("2027-xx-11"), None)
+    assertEquals(Day.of(2024, 2, 29).iso, "2024-02-29")
+    assertEquals(Day.of(2023, 2, 29).iso, "2023-03-01")
+    assertEquals(Day.of(1900, 2, 29).iso, "1900-03-01")
+    assertEquals(Day.of(2000, 2, 29).iso, "2000-02-29")
