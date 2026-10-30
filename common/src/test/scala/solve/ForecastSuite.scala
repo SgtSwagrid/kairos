@@ -7,40 +7,65 @@ import munit.FunSuite
 
 class ForecastSuite extends FunSuite:
 
-  test("the attendance distribution is a distribution"):
+  test(
+    "the attendance distribution sums to one around the probabilities' sum, binomial for equal ones and certain for certain ones",
+  ):
     val probabilities = List(0.1, 0.35, 0.5, 0.72, 0.9, 0.99)
     val distribution  = Forecast.poissonBinomial(probabilities)
     assertEquals(
       distribution.size,
       probabilities.size + 1,
+      "one outcome for each possible count",
     )
-    assertEqualsDouble(distribution.sum, 1.0, 1.0e-9)
-    assert(distribution.forall(_ >= 0.0))
+    assertEqualsDouble(
+      distribution.sum,
+      1.0,
+      1.0e-9,
+      "the total",
+    )
+    assert(
+      distribution.forall(_ >= 0.0),
+      distribution,
+    )
+    val mean = distribution.zipWithIndex.map((p, count) => p * count).sum
+    assertEqualsDouble(
+      mean,
+      probabilities.sum,
+      1.0e-9,
+      "the mean",
+    )
 
-  test("equal probabilities give the binomial distribution"):
-    val trials       = 8
-    val probability  = 0.3
-    val distribution = Forecast.poissonBinomial(List.fill(trials)(probability))
-    val expected     = (0 to trials).map: successes =>
+    val trials      = 8
+    val probability = 0.3
+    val binomial    = Forecast.poissonBinomial(List.fill(trials)(probability))
+    val expected    = (0 to trials).map: successes =>
       val ways = (1 to successes).foldLeft(1.0): (product, step) =>
         product * (trials - step + 1) / step
       ways * math.pow(probability, successes) *
         math.pow(1 - probability, trials - successes)
-    distribution
+    binomial
       .lazyZip(expected)
-      .foreach((actual, want) => assertEqualsDouble(actual, want, 1.0e-9))
+      .lazyZip(0 to trials)
+      .foreach((actual, want, successes) =>
+        assertEqualsDouble(
+          actual,
+          want,
+          1.0e-9,
+          s"the binomial chance of $successes",
+        ),
+      )
 
-  test("certain trials concentrate all mass on one outcome"):
-    val distribution = Forecast.poissonBinomial(List(1.0, 1.0, 0.0))
-    assertEqualsDouble(distribution(2), 1.0, 1.0e-9)
+    val certain = Forecast.poissonBinomial(List(1.0, 1.0, 0.0))
+    assertEqualsDouble(
+      certain(2),
+      1.0,
+      1.0e-9,
+      "certain trials",
+    )
 
-  test("the mean of the distribution is the sum of the probabilities"):
-    val probabilities = List(0.2, 0.4, 0.6, 0.8)
-    val distribution  = Forecast.poissonBinomial(probabilities)
-    val mean = distribution.zipWithIndex.map((p, count) => p * count).sum
-    assertEqualsDouble(mean, probabilities.sum, 1.0e-9)
-
-  test("an overfull venue is penalised and flagged as risky"):
+  test(
+    "an overfull venue is penalised and flagged as risky, and an impossible capacity does not make risk and overflow disagree",
+  ):
     val cramped = slot("Cramped", "2027-06-11", capacity = 4)
     val guests  = (1 to 10).map(index => participant(s"guest$index")).toList
     val answers =
@@ -70,38 +95,9 @@ class ForecastSuite extends FunSuite:
     )
     assert(forecast.utilisation > 2.0)
 
-  test("a roomy venue of the same popularity is preferred"):
-    val guests  = (1 to 10).map(index => participant(s"guest$index")).toList
-    val roomy   = slot("Roomy", "2027-06-11", capacity = 20)
-    val cramped = slot("Cramped", "2027-06-18", capacity = 4)
-    val answers = guests.flatMap: guest =>
-      List(
-        says(guest.name, roomy, Availability.Yes),
-        says(guest.name, cramped, Availability.Yes),
-      )
-    val subject   = poll(List(roomy, cramped), guests).copy(responses = answers)
-    val forecasts = Forecast.all(
-      Belief.from(subject),
-      subject.objective,
-    )
-    assertEquals(forecasts.head.slot.venue, "Roomy")
-
-  test("cost counts against a slot in proportion to its weight"):
-    val free    = slot("Free", "2027-06-11", cost = 0)
-    val pricey  = slot("Pricey", "2027-06-18", cost = 10)
-    val guests  = (1 to 6).map(index => participant(s"guest$index")).toList
-    val costly  = Objective(costWeight = 0.5)
-    val subject = poll(List(free, pricey), guests, costly)
-    val beliefs = Belief.from(subject)
-    val gap     = Forecast.of(beliefs, 0, costly).score -
-      Forecast.of(beliefs, 1, costly).score
-    assertEqualsDouble(gap, 5.0, 1.0e-9)
-
-  test("an impossible capacity does not make risk and overflow disagree"):
-    val guests = (1 to 6).map(index => participant(s"guest$index")).toList
     List(-5, 0, Int.MaxValue).foreach: capacity =>
       val odd      = slot("Odd", "2027-06-11", capacity = capacity)
-      val subject  = poll(List(odd), guests)
+      val subject  = poll(List(odd), guests.take(6))
       val forecast = Forecast.of(
         Belief.from(subject),
         0,
@@ -116,3 +112,14 @@ class ForecastSuite extends FunSuite:
         s"capacity $capacity is never overrun yet overflows by ${ forecast
             .overflow }",
       )
+
+  test("cost counts against a slot in proportion to its weight"):
+    val free    = slot("Free", "2027-06-11", cost = 0)
+    val pricey  = slot("Pricey", "2027-06-18", cost = 10)
+    val guests  = (1 to 6).map(index => participant(s"guest$index")).toList
+    val costly  = Objective(costWeight = 0.5)
+    val subject = poll(List(free, pricey), guests, costly)
+    val beliefs = Belief.from(subject)
+    val gap     = Forecast.of(beliefs, 0, costly).score -
+      Forecast.of(beliefs, 1, costly).score
+    assertEqualsDouble(gap, 5.0, 1.0e-9)

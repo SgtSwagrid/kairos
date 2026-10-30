@@ -43,43 +43,48 @@ class PollsSuite extends CatsEffectSuite:
       Availability.Yes,
     )))
 
-  scratch.test("concurrent answers all survive, and the file stays readable"):
-    directory =>
-      val file = directory.resolve("polls.json")
-      val poll = draft("Busy").toPoll(Id("busy"))
+  scratch.test(
+    "concurrent answers all survive, and the file stays readable, across a restart",
+  ): directory =>
+    val file = directory.resolve("polls.json")
+    val poll = draft("Busy").toPoll(Id("busy"))
 
-      val exercise =
-        for
-          store <- Polls.open(Some(file))
-          _     <- store.put(poll)
-          // Every guest answering at once, which for thirty-odd people is simply
-          // what happens when a round goes out.
-          _ <- (0 until 64)
-            .toList
-            .parTraverse(index =>
-              store.update(Id[Poll]("busy"))(answered(_, index)),
-            )
-          held  <- store.get(Id("busy"))
-          saved <- IO.blocking(String(Files.readAllBytes(file), UTF_8))
-        yield (held, saved)
+    val exercise =
+      for
+        store <- Polls.open(Some(file))
+        _     <- store.put(poll)
+        // Every guest answering at once, which for thirty-odd people is simply
+        // what happens when a round goes out.
+        _ <- (0 until 64)
+          .toList
+          .parTraverse(index =>
+            store.update(Id[Poll]("busy"))(answered(_, index)),
+          )
+        held     <- store.get(Id("busy"))
+        saved    <- IO.blocking(String(Files.readAllBytes(file), UTF_8))
+        reopened <- Polls.open(Some(file))
+        found    <- reopened.get(Id("busy"))
+      yield (held, saved, found)
 
-      exercise.map: (held, saved) =>
-        assertEquals(
-          held.map(_.responses.size),
-          Some(64),
-          "one per guest",
-        )
-        assert(
-          decode[List[Poll]](saved).isRight,
-          s"the file did not survive: ${ saved.take(80) }",
-        )
-        assertEquals(
-          decode[List[Poll]](saved)
-            .toOption
-            .flatMap(_.headOption)
-            .map(_.responses.size),
-          Some(64),
-        )
+    exercise.map: (held, saved, found) =>
+      assertEquals(
+        held.map(_.responses.size),
+        Some(64),
+        "one per guest",
+      )
+      assert(
+        decode[List[Poll]](saved).isRight,
+        s"the file did not survive: ${ saved.take(80) }",
+      )
+      assertEquals(
+        decode[List[Poll]](saved)
+          .toOption
+          .flatMap(_.headOption)
+          .map(_.responses.size),
+        Some(64),
+      )
+      assertEquals(found.map(_.title), Some("Busy"))
+      assertEquals(found.map(_.responses.size), Some(64))
 
   scratch.test("an unreadable file is set aside rather than written over"):
     directory =>
@@ -102,22 +107,6 @@ class PollsSuite extends CatsEffectSuite:
           kept.exists(_.endsWith(".bad")),
           s"the unreadable file should have been kept: $kept",
         )
-
-  scratch.test("polls survive a restart"): directory =>
-    val file = directory.resolve("polls.json")
-
-    val exercise =
-      for
-        first  <- Polls.open(Some(file))
-        _      <- first.put(draft("Kept").toPoll(Id("kept")))
-        _      <- first.update(Id[Poll]("kept"))(answered(_, 0))
-        second <- Polls.open(Some(file))
-        found  <- second.get(Id("kept"))
-      yield found
-
-    exercise.map: found =>
-      assertEquals(found.map(_.title), Some("Kept"))
-      assertEquals(found.map(_.responses.size), Some(1))
 
   scratch.test("polls are listed most recently created first"): directory =>
     val exercise =
