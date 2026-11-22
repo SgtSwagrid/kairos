@@ -9,6 +9,7 @@ import com.alecdorrington.common.solve.{Forecast, Round, Verdict}
 import com.raquo.laminar.api.L.{*, given}
 import scala.scalajs.js
 import scala.scalajs.js.annotation.JSExportTopLevel
+import scala.util.control.NonFatal
 
 /**
   * The organiser's view of one poll, at URL `/polls/{poll}`.
@@ -624,4 +625,4 @@ object OrganiserView extends View:
     */
   private def copy(text: String): Unit =
     try js.Dynamic.global.navigator.clipboard.writeText(text)
-    catch case _: Throwable => ()
+    catch case NonFatal(_) => ()
