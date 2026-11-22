@@ -118,7 +118,7 @@ Set on each poll, and adjustable from the dashboard:
 ## 🚧 Requirements
 
 - **[Scala 3](https://www.scala-lang.org/)** — fetched by sbt; installing it separately is optional.
-- **[sbt 2.0](https://www.scala-sbt.org/)** — the build tool.
+- **[sbt 2.1](https://www.scala-sbt.org/)** — the build tool.
 - **[JDK 21](https://www.oracle.com/java/technologies/downloads/)** — the runtime.
 - **[Git](https://git-scm.com/)** — for version control.
 
